@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gmail-order-processor"
+version = "0.1.0"
+description = "Read-only Gmail inbox integration with AI email classification"
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client>=2.100.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.2.0",
+    "python-dotenv>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "pytest>=8.0.0",
+    "openai-agents>=0.15.0,<1.0",
+]
+
+[project.scripts]
+gmail-inbox = "gmail_order_processor.main:main"
+gmail-classify = "gmail_order_processor.classification_cli:main"
+product-catalog = "gmail_order_processor.inventory_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
