@@ -94,7 +94,7 @@ The sample file is a small, illustrative hand-labeled set, not a claim about acc
 
 ## Phase 3: SQLite product catalog
 
-The local catalog schema contains an integer ID, product name, unique SKU, whole-euro price, and stock quantity. It starts with 15 fictional furniture products. Seeding is idempotent: it inserts missing SKUs and leaves existing rows unchanged. Existing databases with cents are migrated to whole euros by rounding to the nearest euro (half-up).
+The local catalog schema contains an integer ID, product name, unique SKU, whole-euro price, and stock quantity. It starts with 15 fictional furniture products. Seeding is idempotent: it inserts missing SKUs and leaves existing rows unchanged.
 
 Create and seed the default database (`data/products.sqlite3`), then list its products:
 

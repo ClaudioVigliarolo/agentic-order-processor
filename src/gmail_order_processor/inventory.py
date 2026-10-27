@@ -77,18 +77,6 @@ class ProductRepository:
                 )
                 """
             )
-            columns = {
-                str(row["name"])
-                for row in connection.execute("PRAGMA table_info(products)").fetchall()
-            }
-            if "price_cents" in columns and "price_euros" not in columns:
-                # Legacy catalog migration: convert cents to whole euros, half-up.
-                connection.execute(
-                    "ALTER TABLE products RENAME COLUMN price_cents TO price_euros"
-                )
-                connection.execute(
-                    "UPDATE products SET price_euros = CAST((price_euros + 50) / 100 AS INTEGER)"
-                )
 
     def seed_demo_products(self) -> int:
         """Insert fictional products that are not already present by SKU.

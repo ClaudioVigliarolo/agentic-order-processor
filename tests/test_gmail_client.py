@@ -1,5 +1,4 @@
 import base64
-import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -262,27 +261,5 @@ def test_product_database_seeds_fictional_catalog_idempotently(tmp_path):
     assert chair.name == "Nordic Oak Dining Chair"
     assert chair.price_euros == 129
     assert chair.stock_quantity == 24
-
-
-def test_product_database_migrates_cents_to_whole_euros(tmp_path):
-    database = tmp_path / "legacy.sqlite3"
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            """
-            CREATE TABLE products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                sku TEXT NOT NULL UNIQUE,
-                price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
-                stock_quantity INTEGER NOT NULL CHECK (stock_quantity >= 0)
-            )
-            """
-        )
-        connection.executemany(
-            "INSERT INTO products (name, sku, price_cents, stock_quantity) VALUES (?, ?, ?, ?)",
-            [("Chair", "OLD-001", 12349, 2), ("Desk", "OLD-002", 12350, 3)],
-        )
-
-    products = ProductRepository(database).list_products()
-    assert [product.price_euros for product in products] == [123, 124]
-
+    chair = repository.get_by_sku("FUR-TBL-005")
+    assert chair is None
