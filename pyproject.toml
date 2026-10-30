@@ -15,12 +15,14 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "pytest>=8.0.0",
     "openai-agents>=0.15.0,<1.0",
+    "mcp[cli]>=2.0.0,<3.0",
 ]
 
 [project.scripts]
 gmail-inbox = "gmail_order_processor.main:main"
 gmail-classify = "gmail_order_processor.classification_cli:main"
 product-catalog = "gmail_order_processor.inventory_cli:main"
+inventory-mcp = "gmail_order_processor.inventory_mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

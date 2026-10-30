@@ -107,6 +107,30 @@ class ProductRepository:
             ).fetchall()
         return [self._to_product(row) for row in rows]
 
+    def search_products(self, query: str, limit: int = 10) -> list[Product]:
+        """Find products by a case-insensitive substring in name or SKU."""
+        query = query.strip()
+        if not query:
+            raise ValueError("query must not be empty")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50")
+        escaped_query = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped_query}%"
+        self.initialize()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, name, sku, price_euros, stock_quantity
+                FROM products
+                WHERE name LIKE ? ESCAPE '\\' COLLATE NOCASE
+                   OR sku LIKE ? ESCAPE '\\' COLLATE NOCASE
+                ORDER BY CASE WHEN sku = ? COLLATE NOCASE THEN 0 ELSE 1 END, name
+                LIMIT ?
+                """,
+                (pattern, pattern, query, limit),
+            ).fetchall()
+        return [self._to_product(row) for row in rows]
+
     def get_by_sku(self, sku: str) -> Product | None:
         self.initialize()
         with self._connection() as connection:
@@ -114,7 +138,7 @@ class ProductRepository:
                 """
                 SELECT id, name, sku, price_euros, stock_quantity
                 FROM products
-                WHERE sku = ?
+                WHERE sku = ? COLLATE NOCASE
                 """,
                 (sku,),
             ).fetchone()

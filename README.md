@@ -107,3 +107,16 @@ Set `PRODUCT_DB_PATH` to use a different SQLite file. Database files are exclude
 
 This phase only creates and reads the catalog. It does not yet compare extracted order items with the catalog or reserve/decrement stock.
 
+## Inventory MCP server
+
+The Python MCP server exposes two read-only tools over stdio: `search_products(query, limit=10)` searches product names and SKUs, and `check_stock(sku, quantity=1)` reports the available quantity and whether the requested amount is in stock. It uses the same `PRODUCT_DB_PATH` setting as the catalog CLI. It does not reserve or change stock, and it is not yet connected to an AI agent.
+
+Install the MCP dependency and start the server in MCP Inspector for local tool testing:
+
+```bash
+python -m pip install -e .
+mcp dev src/gmail_order_processor/inventory_mcp_server.py
+```
+
+The SDK's stdio transport is intended to be launched by an MCP host as a child process. For example, a host can launch `python -m gmail_order_processor.inventory_mcp_server` with the project directory as its working directory. The official [MCP Python SDK docs](https://py.sdk.modelcontextprotocol.io/) describe this local stdio setup.
+
