@@ -149,8 +149,8 @@ def test_classification_uses_structured_output_and_routes_unrelated():
     ("category", "route"),
     [
         (EmailCategory.NEW_ORDER, "order_workflow"),
-        (EmailCategory.PRODUCT_INQUIRY, "order_workflow"),
-        (EmailCategory.CANCELLATION, "order_workflow"),
+        (EmailCategory.PRODUCT_INQUIRY, "response_workflow"),
+        (EmailCategory.CANCELLATION, "human_review"),
         (EmailCategory.UNRELATED, "ignored"),
         (EmailCategory.UNCERTAIN, "human_review"),
     ],

@@ -20,7 +20,7 @@ def test_search_products_tool_returns_catalog_matches(tmp_path):
     repository.seed_demo_products()
     server = create_inventory_mcp_server(repository)
 
-    result = _call_tool(server, "search_products", {"query": "blue"})
+    result = _call_tool(server, "search_products", {"query": "blue", "limit": 10})
     payload = json.loads(result.content[0].text)
 
     assert result.is_error is False

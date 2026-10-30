@@ -11,14 +11,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .classification import (
+from .agents import (
     EmailCategory,
     EmailClassifier,
     calculate_accuracy,
 )
 from .gmail_client import GmailAPIError, GmailAuthenticationError, GmailClient
 from .gmail_client import EmailMessage
-from .order_extraction import OrderExtractor
+from .agents import OrderExtractor
 from .workflow import classify_and_extract
 
 

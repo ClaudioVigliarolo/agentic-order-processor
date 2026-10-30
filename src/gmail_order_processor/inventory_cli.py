@@ -29,18 +29,19 @@ def cervino() -> int:
         print(f"Inserted {inserted} demo products ({len(repository.list_products())} total).")
         return 0
 
-    products = repository.list_products()
-    if not products:
-        print("No products found. Run `python -m gmail_order_processor.inventory_cli seed` first.")
+    if args.command == "list":
+        products = repository.list_products()
+        if not products:
+            print("No products found. Run `python -m gmail_order_processor.inventory_cli seed` first.")
+            return 0
+        print(f"{'ID':>3}  {'SKU':<14} {'PRICE (€)':>11} {'STOCK':>5}  NAME")
+        for product in products:
+            price = f"€{product.price_euros:,}"
+            print(
+                f"{product.id:>3}  {product.sku:<14} "
+                f"{price:>11} {product.stock_quantity:>5}  {product.name}"
+            )
         return 0
-    print(f"{'ID':>3}  {'SKU':<14} {'PRICE (€)':>11} {'STOCK':>5}  NAME")
-    for product in products:
-        price = f"€{product.price_euros:,}"
-        print(
-            f"{product.id:>3}  {product.sku:<14} "
-            f"{price:>11} {product.stock_quantity:>5}  {product.name}"
-        )
-    return 0
 
 
 if __name__ == "__main__":

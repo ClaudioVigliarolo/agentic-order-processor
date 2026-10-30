@@ -1,17 +1,188 @@
-"""Connect classification to order extraction for new-order messages."""
+"""Safe orchestration for classifying, extracting, and checking an order email."""
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
-from .classification import (
+from pydantic import BaseModel
+
+from .agents import (
+    CustomerReply,
     EmailCategory,
     EmailClassification,
     EmailClassifier,
-    classification_record,
+    InventoryAgent,
+    InventoryCheck,
+    InventoryItemStatus,
+    OrderExtraction,
+    OrderExtractor,
+    ResponseAgent,
 )
+from .agents.classifier import workflow_route
 from .gmail_client import EmailMessage
-from .order_extraction import OrderExtractor
+
+
+class WorkflowStatus(str, Enum):
+    IGNORED = "ignored"
+    HUMAN_REVIEW = "human_review"
+    HUMAN_REVIEW_ERROR = "human_review_error"
+    NEEDS_CUSTOMER_INFORMATION = "needs_customer_information"
+    READY_FOR_HUMAN_APPROVAL = "ready_for_human_approval"
+
+
+class WorkflowResult(BaseModel):
+    message_id: str
+    category: EmailCategory | None = None
+    confidence: float | None = None
+    status: WorkflowStatus
+    rationale: str | None = None
+    order_extraction: OrderExtraction | None = None
+    inventory: InventoryCheck | None = None
+    draft_reply: CustomerReply | None = None
+    error: str | None = None
+
+
+class OrderWorkflow:
+    """Run one message through the safe, sequential order-processing workflow."""
+
+    def __init__(
+        self,
+        classifier: EmailClassifier | Any | None = None,
+        extractor: OrderExtractor | Any | None = None,
+        inventory_agent: InventoryAgent | Any | None = None,
+        response_agent: ResponseAgent | Any | None = None,
+    ) -> None:
+        self.classifier = classifier or EmailClassifier()
+        self.extractor = extractor or OrderExtractor()
+        self.inventory_agent = inventory_agent or InventoryAgent()
+        self.response_agent = response_agent or ResponseAgent()
+
+    def process(self, message: EmailMessage) -> WorkflowResult:
+        try:
+            classification = self.classifier.classify(message)
+        except Exception:
+            return WorkflowResult(
+                message_id=message.message_id,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Classification failed; later workflow steps were skipped.",
+            )
+
+        base = {
+            "message_id": message.message_id,
+            "category": classification.category,
+            "confidence": classification.confidence,
+            "rationale": classification.rationale,
+        }
+        if classification.category is EmailCategory.UNRELATED:
+            return WorkflowResult(**base, status=WorkflowStatus.IGNORED)
+        if classification.category is EmailCategory.UNCERTAIN:
+            return WorkflowResult(**base, status=WorkflowStatus.HUMAN_REVIEW)
+
+        # Product inquiries and cancellations are not new orders. Draft only a
+        # neutral acknowledgement and route it for human review.
+        if classification.category in (EmailCategory.PRODUCT_INQUIRY, EmailCategory.CANCELLATION):
+            return self._draft_reply(
+                base,
+                status=WorkflowStatus.HUMAN_REVIEW,
+                context={
+                    "category": classification.category.value,
+                    "subject": message.subject,
+                    "sender": message.sender,
+                    "email_body": message.body,
+                    "review_required": True,
+                    "missing_information": [],
+                    "inventory": [],
+                },
+            )
+
+        # Keep extraction explicitly limited to new-order messages. If another
+        # category is added later, it will stop here instead of entering ordering.
+        if classification.category is not EmailCategory.NEW_ORDER:
+            return WorkflowResult(**base, status=WorkflowStatus.HUMAN_REVIEW)
+
+        try:
+            extraction = self.extractor.extract(message)
+        except Exception:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Order extraction failed; inventory and reply drafting were skipped.",
+            )
+
+        base["order_extraction"] = extraction
+        missing = list(extraction.missing_information)
+        if not extraction.products:
+            missing.append("requested products")
+        if not extraction.delivery_address:
+            missing.append("delivery address")
+        if any(product.quantity is None for product in extraction.products):
+            missing.append("quantity for each requested product")
+        missing = list(dict.fromkeys(missing))
+        if missing:
+            return self._draft_reply(
+                base,
+                status=WorkflowStatus.NEEDS_CUSTOMER_INFORMATION,
+                context={
+                    "category": classification.category.value,
+                    "subject": message.subject,
+                    "sender": message.sender,
+                    "order": extraction.model_dump(mode="json"),
+                    "missing_information": missing,
+                    "inventory": [],
+                },
+            )
+
+        try:
+            inventory = self.inventory_agent.check(extraction)
+        except Exception:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Inventory lookup failed; a reply was not drafted.",
+            )
+        base["inventory"] = inventory
+        inventory_data = inventory.model_dump(mode="json")["items"]
+        if any(item.status is not InventoryItemStatus.AVAILABLE for item in inventory.items):
+            return self._draft_reply(
+                base,
+                status=WorkflowStatus.HUMAN_REVIEW,
+                context={
+                    "category": classification.category.value,
+                    "subject": message.subject,
+                    "sender": message.sender,
+                    "order": extraction.model_dump(mode="json"),
+                    "missing_information": [],
+                    "inventory": inventory_data,
+                    "review_required": True,
+                },
+            )
+        return self._draft_reply(
+            base,
+            status=WorkflowStatus.READY_FOR_HUMAN_APPROVAL,
+            context={
+                "category": classification.category.value,
+                "subject": message.subject,
+                "sender": message.sender,
+                "order": extraction.model_dump(mode="json"),
+                "missing_information": [],
+                "inventory": inventory_data,
+                "review_required": True,
+            },
+        )
+
+    def _draft_reply(
+        self, base: dict[str, Any], *, status: WorkflowStatus, context: dict[str, Any]
+    ) -> WorkflowResult:
+        try:
+            reply = self.response_agent.draft(context)
+        except Exception:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Reply drafting failed; nothing was sent.",
+            )
+        return WorkflowResult(**base, status=status, draft_reply=reply)
 
 
 def classify_and_extract(
@@ -19,9 +190,15 @@ def classify_and_extract(
     classifier: EmailClassifier,
     extractor: OrderExtractor,
 ) -> tuple[EmailClassification, dict[str, Any]]:
-    """Classify an email and extract order fields only for new orders."""
+    """Backward-compatible phase-2 helper retained for classification evaluation."""
     classification = classifier.classify(message)
-    record = classification_record(message, classification)
+    record: dict[str, Any] = {
+        "message_id": message.message_id,
+        "category": classification.category.value,
+        "confidence": classification.confidence,
+        "rationale": classification.rationale,
+        "route": workflow_route(classification.category),
+    }
     if classification.category is EmailCategory.NEW_ORDER:
         record["order_extraction"] = extractor.extract(message).model_dump(mode="json")
     return classification, record

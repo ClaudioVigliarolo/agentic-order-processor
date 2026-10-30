@@ -1,6 +1,6 @@
-# Gmail Order Processor — Phase 1
+# Gmail Order Processor
 
-A Python 3.11+ command-line project that reads recent messages from the Gmail inbox using the official Gmail API, classifies them, and extracts order details from new-order emails with the OpenAI Agents SDK. It requests only `gmail.readonly`; it does not change messages or send mail. Inventory, MCP servers, and a frontend are not implemented.
+A Python 3.11+ command-line project that reads recent Gmail messages, classifies email, extracts order details, checks a local product catalog, and drafts replies for human review. It requests only `gmail.readonly`; it does not change messages or send mail.
 
 ## Project layout
 
@@ -8,9 +8,13 @@ A Python 3.11+ command-line project that reads recent messages from the Gmail in
 src/gmail_order_processor/
   gmail_client.py       OAuth, read-only Gmail access, MIME/body parsing
   main.py               CLI that prints a 20-message inbox preview
-  classification.py     Typed email classification agent and routing
-  order_extraction.py   Pydantic schema and order extraction agent
-  workflow.py           Runs extraction only for new_order classifications
+  agents/
+    classifier.py       Email classification agent and routing
+    order_extractor.py  Order extraction agent and Pydantic schemas
+    inventory_agent.py  Catalog matching and stock lookup
+    response_agent.py   Customer reply drafting agent
+  workflow.py           Safely orchestrates classification, extraction, inventory, and reply drafts
+  workflow_cli.py       Runs the full review-only workflow on Gmail or sample emails
   classification_cli.py Inbox classification and human-labeled evaluation
 sample_emails.json     20 labeled example emails for classification evaluation
 tests/
@@ -61,9 +65,9 @@ python -m pytest
 
 ## Phase 2: email classification
 
-The classification agent uses the OpenAI Agents SDK and returns a typed JSON result with a category, confidence, and brief rationale. Routing is deterministic: `unrelated` is marked `ignored`, `uncertain` is marked `human_review`, and the other three labels are routed to the order workflow. This phase does not create orders, send replies, or change Gmail messages.
+The classification agent uses the OpenAI Agents SDK and returns a typed JSON result with a category, confidence, and brief rationale. Unrelated emails are ignored, uncertain emails are sent to human review, and only new orders enter order extraction. This phase does not create orders, send replies, or change Gmail messages.
 
-For a `new_order` classification, a second agent extracts product names, quantities, color/size/model variants, the delivery address, and missing information into a Pydantic-validated result. The CLI includes this extraction in the JSON output only for `new_order` emails. It does not create or confirm an order.
+For a `new_order` classification, a second agent extracts product names, quantities, color/size/model variants, the delivery address, and missing information into a Pydantic-validated result. The classification CLI includes this extraction only for `new_order` emails. The complete workflow is described below.
 
 Install the updated dependencies in the project environment:
 
@@ -105,11 +109,11 @@ python -m gmail_order_processor.inventory_cli list
 
 Set `PRODUCT_DB_PATH` to use a different SQLite file. Database files are excluded from Git; the seed catalog remains in `inventory.py`.
 
-This phase only creates and reads the catalog. It does not yet compare extracted order items with the catalog or reserve/decrement stock.
+The catalog supports read-only product matching and stock checks. It never reserves or decrements stock.
 
 ## Inventory MCP server
 
-The Python MCP server exposes two read-only tools over stdio: `search_products(query, limit=10)` searches product names and SKUs, and `check_stock(sku, quantity=1)` reports the available quantity and whether the requested amount is in stock. It uses the same `PRODUCT_DB_PATH` setting as the catalog CLI. It does not reserve or change stock, and it is not yet connected to an AI agent.
+The Python MCP server exposes two read-only tools over stdio: `search_products(query, limit=10)` searches product names and SKUs, and `check_stock(sku, quantity=1)` reports the available quantity and whether the requested amount is in stock. It uses the same `PRODUCT_DB_PATH` setting as the catalog CLI. The local order workflow currently uses the same repository directly for deterministic product matching and stock checks; MCP remains available to external MCP hosts.
 
 Install the MCP dependency and start the server in MCP Inspector for local tool testing:
 
@@ -119,4 +123,22 @@ mcp dev src/gmail_order_processor/inventory_mcp_server.py
 ```
 
 The SDK's stdio transport is intended to be launched by an MCP host as a child process. For example, a host can launch `python -m gmail_order_processor.inventory_mcp_server` with the project directory as its working directory. The official [MCP Python SDK docs](https://py.sdk.modelcontextprotocol.io/) describe this local stdio setup.
+
+## Phase 5: review-only order workflow
+
+Run the complete sequence on recent Gmail messages:
+
+```bash
+python -m gmail_order_processor.workflow_cli --limit 20
+```
+
+Or run it on the sample messages without connecting to Gmail:
+
+```bash
+python -m gmail_order_processor.workflow_cli --sample-file sample_emails.json --limit 20
+```
+
+The workflow stops for unrelated and uncertain emails. Product inquiries and cancellations are not treated as new orders; they receive only a neutral reply draft marked for human review. New orders are extracted first. If products, quantities, or the delivery address are missing, the inventory lookup is skipped and a draft asks for the missing information. Inventory checks use exact catalog name/SKU matches; ambiguous names, unknown products, and requested variants the catalog cannot represent are sent for human review. A successful stock check produces a draft marked `ready_for_human_approval`.
+
+The Response Agent returns a typed subject and body, but the program never sends it. Gmail remains read-only, and inventory checks never reserve or change stock. A failed step stops later steps for that message; the CLI emits a safe error status and continues with the next message.
 
