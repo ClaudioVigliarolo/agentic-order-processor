@@ -16,7 +16,8 @@ src/gmail_order_processor/
   workflow.py           Safely orchestrates classification, extraction, inventory, and reply drafts
   workflow_cli.py       Runs the full review-only workflow on Gmail or sample emails
   classification_cli.py Inbox classification and human-labeled evaluation
-sample_emails.json     20 labeled example emails for classification evaluation
+samples/
+  sample_emails.json  20 labeled example emails for classification evaluation
 tests/
   test_gmail_client.py  Mocked Gmail and parsing tests
 ```
@@ -91,7 +92,7 @@ python -m gmail_order_processor.classification_cli
 To classify the 20 labeled examples and report accuracy against their `expected_category` fields:
 
 ```bash
-python -m gmail_order_processor.classification_cli --sample-file sample_emails.json --evaluate
+python -m gmail_order_processor.classification_cli --sample-file samples/sample_emails.json --evaluate
 ```
 
 The sample file is a small, illustrative hand-labeled set, not a claim about accuracy on other inboxes. For a labeled evaluation of your live inbox, omit `--sample-file`; the CLI asks you to enter each message's gold label. Add `--limit N` to classify fewer or more messages. Sample classifications are printed to the terminal and are not saved to disk.
@@ -135,7 +136,7 @@ python -m gmail_order_processor.workflow_cli --limit 20
 Or run it on the sample messages without connecting to Gmail:
 
 ```bash
-python -m gmail_order_processor.workflow_cli --sample-file sample_emails.json --limit 20
+python -m gmail_order_processor.workflow_cli --sample-file samples/sample_emails.json --limit 20
 ```
 
 The workflow stops for unrelated and uncertain emails. Product inquiries and cancellations are not treated as new orders; they receive only a neutral reply draft marked for human review. New orders are extracted first. If products, quantities, or the delivery address are missing, the inventory lookup is skipped and a draft asks for the missing information. Inventory checks use exact catalog name/SKU matches; ambiguous names, unknown products, and requested variants the catalog cannot represent are sent for human review. A successful stock check produces a draft marked `ready_for_human_approval`.

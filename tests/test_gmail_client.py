@@ -171,7 +171,7 @@ def test_accuracy_calculation_requires_gold_labels():
 
 
 def test_sample_email_fixture_has_20_gold_labels():
-    fixture = Path(__file__).parents[1] / "sample_emails.json"
+    fixture = Path(__file__).parents[1] / "samples" / "sample_emails.json"
     messages, expected = _load_sample_file(fixture)
     assert len(messages) == 20
     assert all(label is not None for label in expected)

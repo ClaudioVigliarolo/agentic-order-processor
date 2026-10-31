@@ -1,0 +1,16 @@
+[
+  {
+    "id": "email_001",
+    "from": "customer01@example.com",
+    "subject": "Tables",
+    "body": "Hello, I would like 5 Casa Round Dining Table. I live in Rome in via giuseppe giunchi 7. I need them by next Wednesday. Is that possible?",
+    "expected_category": "new_order"
+  },
+  {
+    "id": "email_002",
+    "from": "customer02@example.com",
+    "subject": "Blue sofas for our waiting room",
+     "body": "Hello, I would like 3 Casa Round Dining Table. I live in Bolzano in via buozzi 7. I need them by next Thursday. Is that possible?",
+    "expected_category": "new_order"
+  }
+]
