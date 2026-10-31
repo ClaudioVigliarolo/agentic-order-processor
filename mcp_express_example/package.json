@@ -1,0 +1,19 @@
+{
+  "name": "mcp-express-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A tiny stateless MCP Streamable HTTP server using Express.",
+  "scripts": {
+    "start": "node server.js",
+    "test:client": "node client.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@openai/agents": "^0.21.0",
+    "dotenv": "^18.0.9",
+    "express": "^5.1.0",
+    "openai": "^7.47.0",
+    "zod": "^4.0.0"
+  }
+}
