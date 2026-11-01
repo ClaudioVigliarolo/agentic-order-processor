@@ -260,6 +260,19 @@ class OrderWorkflow:
                 status=WorkflowStatus.HUMAN_REVIEW_ERROR,
                 error="Reply drafting failed; nothing was sent.",
             )
+        if "order" in base:
+            try:
+                base["order"] = self.order_repository.save_draft_response(
+                    base["order"].id,
+                    subject=reply.subject,
+                    body=reply.body,
+                )
+            except Exception:
+                return WorkflowResult(
+                    **base,
+                    status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                    error="The draft order was saved, but its reply draft could not be stored.",
+                )
         return WorkflowResult(**base, status=status, draft_reply=reply)
 
 

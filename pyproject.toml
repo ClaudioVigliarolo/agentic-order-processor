@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gmail-order-processor"
 version = "0.1.0"
-description = "Read-only Gmail inbox integration with AI email classification"
+description = "AI-assisted Gmail order processing with owner approval dashboard"
 requires-python = ">=3.11"
 dependencies = [
     "google-api-python-client>=2.100.0",
@@ -16,6 +16,10 @@ dependencies = [
     "pytest>=8.0.0",
     "openai-agents>=0.15.0,<1.0",
     "mcp[cli]>=2.0.0,<3.0",
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn[standard]>=0.30.0,<1.0",
+    "PyJWT>=2.9.0,<3.0",
+    "httpx>=0.27.0,<1.0",
 ]
 
 [project.scripts]

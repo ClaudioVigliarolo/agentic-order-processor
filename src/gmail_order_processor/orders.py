@@ -77,6 +77,8 @@ class Order(BaseModel):
     status: OrderStatus
     created_at: str
     updated_at: str
+    response_subject: str | None = None
+    response_body: str | None = None
     items: list[OrderItem]
 
     @property
@@ -121,7 +123,9 @@ class OrderRepository:
                     delivery_address TEXT NOT NULL CHECK (length(trim(delivery_address)) > 0),
                     status TEXT NOT NULL CHECK (status IN ('draft', 'confirmed', 'cancelled')),
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    response_subject TEXT,
+                    response_body TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS order_items (
@@ -137,6 +141,14 @@ class OrderRepository:
                     ON orders(status, created_at);
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(orders)").fetchall()
+            }
+            if "response_subject" not in columns:
+                connection.execute("ALTER TABLE orders ADD COLUMN response_subject TEXT")
+            if "response_body" not in columns:
+                connection.execute("ALTER TABLE orders ADD COLUMN response_body TEXT")
 
     def create_draft_order(
         self,
@@ -274,6 +286,43 @@ class OrderRepository:
                 for row in rows
             ]
 
+    def save_draft_response(
+        self, order_id: int, *, subject: str, body: str
+    ) -> Order:
+        """Persist an AI reply draft on a still-pending order; never send it."""
+        subject = subject.strip()
+        body = body.strip()
+        if not subject or not body:
+            raise ValueError("Response subject and body are required")
+        self.initialize()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT status FROM orders WHERE id = ?", (order_id,)
+                ).fetchone()
+                if row is None:
+                    raise OrderNotFoundError(f"Order not found: {order_id}")
+                if row["status"] != OrderStatus.DRAFT.value:
+                    raise InvalidOrderStateError(
+                        "A reply draft can only be saved while the order is a draft."
+                    )
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET response_subject = ?, response_body = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (subject, body, _utc_now(), order_id),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            saved = self._get_order_on_connection(connection, order_id)
+            assert saved is not None
+            return saved
+
     def confirm_order(self, order_id: int, *, authorized: bool = False) -> Order:
         """Explicitly confirm a draft and deduct all stock in one transaction."""
         if authorized is not True:
@@ -388,6 +437,14 @@ class OrderRepository:
             status=OrderStatus(str(row["status"])),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            response_subject=(
+                str(row["response_subject"])
+                if row["response_subject"] is not None
+                else None
+            ),
+            response_body=(
+                str(row["response_body"]) if row["response_body"] is not None else None
+            ),
             items=[
                 OrderItem(
                     product_name=str(item["product_name"]),

@@ -72,6 +72,8 @@ def test_workflow_creates_one_draft_for_a_new_order_and_skips_duplicate(tmp_path
     assert result.order.status is OrderStatus.DRAFT
     assert result.order.customer_email == "ada@example.com"
     assert result.order.items[0].quantity == 2
+    assert result.order.response_subject == "We received your request"
+    assert result.order.response_body == "Your request is ready for review."
     assert products.get_by_sku("FUR-TBL-001").stock_quantity == 7
 
     duplicate = workflow.process(message)

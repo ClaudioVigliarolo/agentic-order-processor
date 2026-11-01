@@ -138,3 +138,41 @@ def test_cancelling_a_draft_does_not_change_stock(catalog):
 
     assert cancelled.status is OrderStatus.CANCELLED
     assert products.get_by_sku("FUR-TBL-001").stock_quantity == initial_stock
+
+
+def test_order_schema_adds_response_columns_to_an_existing_database(tmp_path):
+    database = tmp_path / "previous-orders.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmail_message_id TEXT NOT NULL UNIQUE,
+                customer_email TEXT NOT NULL,
+                delivery_address TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                product_name TEXT NOT NULL,
+                sku TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_price_euros INTEGER NOT NULL
+            )
+            """
+        )
+
+    OrderRepository(database).initialize()
+
+    with sqlite3.connect(database) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()
+        }
+    assert {"response_subject", "response_body"} <= columns

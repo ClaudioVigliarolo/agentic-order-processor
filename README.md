@@ -1,6 +1,6 @@
 # Gmail Order Processor
 
-A Python 3.11+ command-line project that reads recent Gmail messages, classifies email, extracts order details, checks a local product catalog, and drafts replies for human review. It requests only `gmail.readonly`; it does not change messages or send mail.
+A Python 3.11+ project that reads recent Gmail messages, processes order requests, checks a local catalog, and provides an authenticated owner dashboard for draft review. Gmail access remains `gmail.readonly`; the app does not modify Gmail or send customer replies.
 
 ## Project layout
 
@@ -17,12 +17,16 @@ src/gmail_order_processor/
   workflow_cli.py       Runs the full review-only workflow on Gmail or sample emails
   classification_cli.py Inbox classification and human-labeled evaluation
   orders.py             SQLite draft orders, explicit confirmation, and cancellation
+  dashboard_api.py      FastAPI login, order listing, approval, and rejection endpoints
+frontend/
+  src/                  React order review dashboard
 samples/
   sample_emails.json  20 labeled example emails for classification evaluation
 tests/
   test_gmail_client.py  Mocked Gmail and parsing tests
   test_order_repository.py Order persistence and stock transaction tests
   test_order_workflow.py  Draft creation and duplicate-message workflow tests
+  test_dashboard_api.py  Authenticated dashboard and approval endpoint tests
 ```
 
 ## Google Cloud and OAuth setup
@@ -76,7 +80,7 @@ For a `new_order` classification, a second agent extracts product names, quantit
 Install the updated dependencies in the project environment:
 
 ```bash
-python -m pip install -e .
+.venv/bin/python -m pip install -e .
 ```
 
 Add your OpenAI API key to `.env` (do not replace an existing `.env`):
@@ -162,4 +166,48 @@ python -m pytest tests/test_order_repository.py tests/test_order_workflow.py
 ```
 
 A failed workflow step stops later processing for that message; the CLI emits a safe error status and continues with the next message.
+
+## Step 7: owner approval dashboard
+
+The FastAPI backend exposes authenticated endpoints to list draft orders, inspect their saved AI reply, approve an order, or reject it. The React dashboard shows customer/contact details, products, quantities, catalog prices, delivery address, and the proposed reply. The access token is held in browser memory and expires after the configured number of minutes.
+
+Approving calls the existing transactional `confirm_order()` path: it rechecks and deducts stock, then changes the status to `confirmed`. Rejecting changes a draft to `cancelled` without changing stock. Only the configured owner can call these endpoints. The dashboard does not send replies or change Gmail.
+
+Add these settings to your existing `.env` file without replacing its other values. `.env.example` shows the expected names. Use a long unique password; generate the signing secret with `openssl rand -hex 32` and paste its output as `DASHBOARD_SECRET_KEY`:
+
+```dotenv
+DASHBOARD_OWNER_EMAIL=you@example.com
+DASHBOARD_OWNER_PASSWORD=use-a-long-unique-password
+DASHBOARD_SECRET_KEY=paste-output-from-openssl-rand-hex-32
+DASHBOARD_TOKEN_MINUTES=60
+DASHBOARD_CORS_ORIGINS=http://127.0.0.1:5173
+```
+
+Install the Python dependencies in the project virtual environment:
+
+```bash
+.venv/bin/python -m pip install -e .
+```
+
+Start the API in one terminal from the project root:
+
+```bash
+.venv/bin/python -m uvicorn gmail_order_processor.dashboard_api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Start the React dashboard in a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173` and sign in with `DASHBOARD_OWNER_EMAIL` and `DASHBOARD_OWNER_PASSWORD`. For a fully working dashboard, create draft orders first by running the email workflow. Approve/reject actions are explicit button presses and are enforced again by the authenticated API.
+
+Run the API and order repository tests with:
+
+```bash
+.venv/bin/python -m pytest -q
+```
 
