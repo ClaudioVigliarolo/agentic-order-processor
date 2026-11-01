@@ -16,10 +16,13 @@ src/gmail_order_processor/
   workflow.py           Safely orchestrates classification, extraction, inventory, and reply drafts
   workflow_cli.py       Runs the full review-only workflow on Gmail or sample emails
   classification_cli.py Inbox classification and human-labeled evaluation
+  orders.py             SQLite draft orders, explicit confirmation, and cancellation
 samples/
   sample_emails.json  20 labeled example emails for classification evaluation
 tests/
   test_gmail_client.py  Mocked Gmail and parsing tests
+  test_order_repository.py Order persistence and stock transaction tests
+  test_order_workflow.py  Draft creation and duplicate-message workflow tests
 ```
 
 ## Google Cloud and OAuth setup
@@ -110,7 +113,7 @@ python -m gmail_order_processor.inventory_cli list
 
 Set `PRODUCT_DB_PATH` to use a different SQLite file. Database files are excluded from Git; the seed catalog remains in `inventory.py`.
 
-The catalog supports read-only product matching and stock checks. It never reserves or decrements stock.
+The catalog supports product matching and stock checks. Draft orders do not reserve or decrement stock.
 
 ## Inventory MCP server
 
@@ -139,7 +142,24 @@ Or run it on the sample messages without connecting to Gmail:
 python -m gmail_order_processor.workflow_cli --sample-file samples/sample_emails.json --limit 20
 ```
 
-The workflow stops for unrelated and uncertain emails. Product inquiries and cancellations are not treated as new orders; they receive only a neutral reply draft marked for human review. New orders are extracted first, including any requested delivery date. The Order Extraction Agent returns one Pydantic `delivery_date` field, resolving common relative dates such as `next Wednesday`, `tomorrow`, or `in 2 weeks` against the email date or today's local date if the email has no date. Pydantic validates the result as a calendar date, but a human still needs to review whether the interpretation is correct. The workflow does not confirm delivery availability. If a date cannot be interpreted, the extractor adds that to `missing_information`, so the inventory lookup is skipped and the draft asks for clarification. Missing products, quantities, or delivery addresses are also explicitly requested. Inventory checks use exact catalog name/SKU matches; ambiguous names, unknown products, and requested variants the catalog cannot represent are sent for human review. A successful stock check produces a draft marked `ready_for_human_approval`.
+The workflow stops for unrelated and uncertain emails. Product inquiries and cancellations are not treated as new orders; they receive only a neutral reply draft marked for human review. New orders are extracted first, including any requested delivery date. The Order Extraction Agent returns one Pydantic `delivery_date` field, resolving common relative dates such as `next Wednesday`, `tomorrow`, or `in 2 weeks` against the email date or today's local date if the email has no date. Pydantic validates the result as a calendar date, but a human still needs to review whether the interpretation is correct. The workflow does not confirm delivery availability. If a date cannot be interpreted, the extractor adds that to `missing_information`, so the inventory lookup is skipped and the draft asks for clarification. Missing products, quantities, or delivery addresses are also explicitly requested. Inventory checks use exact catalog name/SKU matches; ambiguous names, unknown products, and requested variants the catalog cannot represent are sent for human review. After a successful stock check, the workflow creates one `draft` order tied to the Gmail message ID. Reprocessing that message returns the existing order instead of creating another. This is reflected as `draft_created` or `duplicate_order` in the workflow result.
 
-The Response Agent returns a typed subject and body, but the program never sends it. Gmail remains read-only, and inventory checks never reserve or change stock. A failed step stops later steps for that message; the CLI emits a safe error status and continues with the next message.
+The Response Agent returns a typed subject and body, but the program never sends it. Gmail remains read-only. Draft creation does not alter stock. Orders stay in `draft` until explicitly confirmed; confirmation rechecks and deducts all line quantities in one SQLite transaction. `confirm_order()` and `cancel_order()` both require `authorized=True`; cancellation of a confirmed order restores its quantities transactionally. The workflow never calls these state-changing methods automatically. For example:
+
+```python
+from gmail_order_processor.orders import OrderRepository
+
+orders = OrderRepository()  # uses PRODUCT_DB_PATH or data/products.sqlite3
+draft = orders.get_order(1)
+confirmed = orders.confirm_order(draft.id, authorized=True)
+# Or: orders.cancel_order(draft.id, authorized=True)
+```
+
+Order persistence, duplicate handling, authorization, stock rechecks, and rollback are covered by the local tests:
+
+```bash
+python -m pytest tests/test_order_repository.py tests/test_order_workflow.py
+```
+
+A failed workflow step stops later processing for that message; the CLI emits a safe error status and continues with the next message.
 

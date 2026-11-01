@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from email.utils import parseaddr
 from typing import Any
 
 from pydantic import BaseModel
@@ -21,6 +22,14 @@ from .agents import (
 )
 from .agents.classifier import workflow_route
 from .gmail_client import EmailMessage
+from .orders import (
+    DuplicateOrderError,
+    InsufficientStockError,
+    Order,
+    OrderItemRequest,
+    OrderRepository,
+    OrderRepositoryError,
+)
 
 
 class WorkflowStatus(str, Enum):
@@ -28,7 +37,8 @@ class WorkflowStatus(str, Enum):
     HUMAN_REVIEW = "human_review"
     HUMAN_REVIEW_ERROR = "human_review_error"
     NEEDS_CUSTOMER_INFORMATION = "needs_customer_information"
-    READY_FOR_HUMAN_APPROVAL = "ready_for_human_approval"
+    DRAFT_CREATED = "draft_created"
+    DUPLICATE_ORDER = "duplicate_order"
 
 
 class WorkflowResult(BaseModel):
@@ -39,6 +49,7 @@ class WorkflowResult(BaseModel):
     rationale: str | None = None
     order_extraction: OrderExtraction | None = None
     inventory: InventoryCheck | None = None
+    order: Order | None = None
     draft_reply: CustomerReply | None = None
     error: str | None = None
 
@@ -52,13 +63,35 @@ class OrderWorkflow:
         extractor: OrderExtractor | Any | None = None,
         inventory_agent: InventoryAgent | Any | None = None,
         response_agent: ResponseAgent | Any | None = None,
+        order_repository: OrderRepository | Any | None = None,
     ) -> None:
         self.classifier = classifier or EmailClassifier()
         self.extractor = extractor or OrderExtractor()
         self.inventory_agent = inventory_agent or InventoryAgent()
         self.response_agent = response_agent or ResponseAgent()
+        self.order_repository = order_repository or OrderRepository()
 
     def process(self, message: EmailMessage) -> WorkflowResult:
+        # Fast idempotency check: an already-seen Gmail message never re-enters
+        # the AI or inventory steps. The DB unique constraint covers races too.
+        try:
+            existing_order = self.order_repository.get_order_by_message_id(
+                message.message_id
+            )
+        except Exception:
+            return WorkflowResult(
+                message_id=message.message_id,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Order storage could not be read; processing was stopped.",
+            )
+        if existing_order is not None:
+            return WorkflowResult(
+                message_id=message.message_id,
+                category=EmailCategory.NEW_ORDER,
+                status=WorkflowStatus.DUPLICATE_ORDER,
+                order=existing_order,
+            )
+
         try:
             classification = self.classifier.classify(message)
         except Exception:
@@ -116,6 +149,9 @@ class OrderWorkflow:
             missing.append("requested products")
         if not extraction.delivery_address:
             missing.append("delivery address")
+        customer_email = parseaddr(message.sender)[1].strip()
+        if not customer_email:
+            missing.append("customer email address")
         if any(product.quantity is None for product in extraction.products):
             missing.append("quantity for each requested product")
         missing = list(dict.fromkeys(missing))
@@ -157,9 +193,49 @@ class OrderWorkflow:
                     "review_required": True,
                 },
             )
+
+        try:
+            order = self.order_repository.create_draft_order(
+                gmail_message_id=message.message_id,
+                customer_email=customer_email,
+                delivery_address=extraction.delivery_address or "",
+                products=[
+                    OrderItemRequest(sku=item.sku or "", quantity=item.quantity)
+                    for item in inventory.items
+                ],
+            )
+        except DuplicateOrderError:
+            existing_order = self.order_repository.get_order_by_message_id(
+                message.message_id
+            )
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.DUPLICATE_ORDER,
+                order=existing_order,
+            )
+        except InsufficientStockError:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW,
+                error="Stock changed after the inventory check; no draft order was created.",
+            )
+        except OrderRepositoryError:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Draft order could not be saved; no reply was drafted.",
+            )
+        except Exception:
+            return WorkflowResult(
+                **base,
+                status=WorkflowStatus.HUMAN_REVIEW_ERROR,
+                error="Draft order could not be saved; no reply was drafted.",
+            )
+
+        base["order"] = order
         return self._draft_reply(
             base,
-            status=WorkflowStatus.READY_FOR_HUMAN_APPROVAL,
+            status=WorkflowStatus.DRAFT_CREATED,
             context={
                 "category": classification.category.value,
                 "subject": message.subject,
@@ -168,6 +244,8 @@ class OrderWorkflow:
                 "missing_information": [],
                 "inventory": inventory_data,
                 "review_required": True,
+                "draft_order_id": order.id,
+                "order_status": order.status.value,
             },
         )
 
