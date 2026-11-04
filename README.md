@@ -1,4 +1,4 @@
-# Gmail Order Processor
+# Agentic Order Processor
 
 A Python project that reads Gmail, classifies order requests, checks a local furniture catalog, and creates orders for owner review. Gmail access uses only `gmail.readonly`; the app does not change Gmail or send email.
 
