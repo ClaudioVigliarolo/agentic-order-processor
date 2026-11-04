@@ -1,201 +1,52 @@
 # Gmail Order Processor
 
-A Python 3.11+ project that reads recent Gmail messages, processes order requests, checks a local catalog, and provides an authenticated owner dashboard for draft review. Gmail access remains `gmail.readonly`; the app does not modify Gmail or send customer replies.
+A Python project that reads Gmail, classifies order requests, checks a local furniture catalog, and creates orders for owner review. Gmail access uses only `gmail.readonly`; the app does not change Gmail or send email.
 
-## Project layout
+Developed with the assistance of AI tools.
 
-```text
-src/gmail_order_processor/
-  gmail_client.py       OAuth, read-only Gmail access, MIME/body parsing
-  main.py               CLI that prints a 20-message inbox preview
-  agents/
-    classifier.py       Email classification agent and routing
-    order_extractor.py  Order extraction agent and Pydantic schemas
-    inventory_agent.py  Catalog matching and stock lookup
-    response_agent.py   Customer reply drafting agent
-  workflow.py           Safely orchestrates classification, extraction, inventory, and reply drafts
-  workflow_cli.py       Runs the full review-only workflow on Gmail or sample emails
-  classification_cli.py Inbox classification and human-labeled evaluation
-  orders.py             SQLite draft orders, explicit confirmation, and cancellation
-  dashboard_api.py      FastAPI login, order listing, approval, and rejection endpoints
-frontend/
-  src/                  React order review dashboard
-samples/
-  sample_emails.json  20 labeled example emails for classification evaluation
-tests/
-  test_gmail_client.py  Mocked Gmail and parsing tests
-  test_order_repository.py Order persistence and stock transaction tests
-  test_order_workflow.py  Draft creation and duplicate-message workflow tests
-  test_dashboard_api.py  Authenticated dashboard and approval endpoint tests
-```
+## Setup
 
-## Google Cloud and OAuth setup
+Create a Google Cloud project, enable the Gmail API, configure the OAuth consent screen, and create a **Desktop app** OAuth client. Download its credentials JSON as `credentials.json` into the project root. On first Gmail access, a browser opens for authorization; the app saves the local token as `token.json`. Both files are ignored by Git.
 
-1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
-2. In **APIs & Services → Library**, enable **Gmail API** for that project.
-3. In **Google Auth Platform** (or **APIs & Services → OAuth consent screen**), configure the consent screen. Choose **External** for a personal Gmail account unless your Workspace administrator requires a different choice. Fill in the required app name and contact details. While the app is in testing, add the Google account you will use under **Test users**.
-4. Under **Clients** (or **APIs & Services → Credentials → Create credentials → OAuth client ID**), create an OAuth client with application type **Desktop app**.
-5. Download its JSON file. Rename it `credentials.json` and place it in this project directory, alongside `README.md`. Keep the file private; it is excluded from Git.
-
-The program requests only the `https://www.googleapis.com/auth/gmail.readonly` scope. On the first run, Google opens a browser for account selection and consent. After consent, the local OAuth flow writes the refresh/access credentials to `token.json` in this project directory. The token file is ignored by Git. Later runs use or refresh that local token; if access is revoked, remove `token.json` and run the program again to re-authorize.
-
-The program reports authentication/API errors without printing token contents. A successful Gmail connection is established only after the OAuth flow succeeds and the Gmail API returns messages; before then, this setup guide does not assume the connection works.
-
-## Install and run
-
-From this directory:
+From the project root, create the virtual environment and install dependencies:
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m gmail_order_processor.main
-```
-
-If `python3.11` is not the command for your Python 3.11+ installation, substitute the appropriate executable. The `.env` file is optional; the defaults are `credentials.json`, `token.json`, and 20 messages. If `.env` does not already exist, create it from `.env.example`; if it does exist, add or update settings without replacing your current file:
-
-```dotenv
-GMAIL_CREDENTIALS_FILE=credentials.json
-GMAIL_TOKEN_FILE=token.json
-GMAIL_MAX_RESULTS=20
-```
-
-You can also run the installed command `gmail-inbox` after installation. The client supports paginated retrieval through `iter_inbox_messages(page_size=..., max_results=...)`; the CLI displays up to the latest 20 inbox messages.
-
-## Tests
-
-Tests mock Gmail API responses and do not need Google credentials or a Gmail account:
-
-```bash
-python -m pytest
-```
-
-## Phase 2: email classification
-
-The classification agent uses the OpenAI Agents SDK and returns a typed JSON result with a category, confidence, and brief rationale. Unrelated emails are ignored, uncertain emails are sent to human review, and only new orders enter order extraction. This phase does not create orders, send replies, or change Gmail messages.
-
-For a `new_order` classification, a second agent extracts product names, quantities, color/size/model variants, the delivery address, and missing information into a Pydantic-validated result. The classification CLI includes this extraction only for `new_order` emails. The complete workflow is described below.
-
-Install the updated dependencies in the project environment:
-
-```bash
+python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 ```
 
-Add your OpenAI API key to `.env` (do not replace an existing `.env`):
+If you do not already have `.env`, copy `.env.example`; otherwise add these settings without replacing your existing file. Set `OPENAI_API_KEY` for AI features. For dashboard login, set the owner email and a password of at least 12 characters. Generate `DASHBOARD_SECRET_KEY` with `openssl rand -hex 32`. Do not commit `.env` or real credentials.
 
-```dotenv
-OPENAI_API_KEY=your-api-key
-OPENAI_MODEL=gpt-6-luna
-```
-
-The email sender, subject, and body are sent to the configured OpenAI model for classification; a new-order email is then sent to the extraction agent. Run the workflow on up to 20 newest inbox emails with:
+## Run
 
 ```bash
-python -m gmail_order_processor.classification_cli
+# Preview recent Gmail messages
+.venv/bin/python -m gmail_order_processor.main
+
+# Initialize the furniture catalog and list its products
+.venv/bin/python -m gmail_order_processor.inventory_cli seed
+.venv/bin/python -m gmail_order_processor.inventory_cli list
+
+# Process sample emails (AI API calls are made)
+.venv/bin/python -m gmail_order_processor.workflow_cli --sample-file samples/sample_emails.json --limit 20
+
+# Run the Python MCP inventory server in MCP Inspector
+.venv/bin/mcp dev src/gmail_order_processor/inventory_mcp_server.py
 ```
 
-To classify the 20 labeled examples and report accuracy against their `expected_category` fields:
+The workflow creates a draft order only when a new order has enough information and its products match available catalog items. Reprocessing the same Gmail message won’t create a duplicate. Drafts do not reserve stock.
 
-```bash
-python -m gmail_order_processor.classification_cli --sample-file samples/sample_emails.json --evaluate
-```
+## Owner dashboard
 
-The sample file is a small, illustrative hand-labeled set, not a claim about accuracy on other inboxes. For a labeled evaluation of your live inbox, omit `--sample-file`; the CLI asks you to enter each message's gold label. Add `--limit N` to classify fewer or more messages. Sample classifications are printed to the terminal and are not saved to disk.
+The dashboard shows saved orders and their AI reply drafts. Sign in with the configured owner credentials. Approving a draft rechecks and deducts stock; rejecting it cancels it. Both actions require authentication. Replies are never sent.
 
-## Phase 3: SQLite product catalog
-
-The local catalog schema contains an integer ID, product name, unique SKU, whole-euro price, and stock quantity. It starts with 15 fictional furniture products. Seeding is idempotent: it inserts missing SKUs and leaves existing rows unchanged.
-
-Create and seed the default database (`data/products.sqlite3`), then list its products:
-
-```bash
-python -m gmail_order_processor.inventory_cli seed
-python -m gmail_order_processor.inventory_cli list
-```
-
-Set `PRODUCT_DB_PATH` to use a different SQLite file. Database files are excluded from Git; the seed catalog remains in `inventory.py`.
-
-The catalog supports product matching and stock checks. Draft orders do not reserve or decrement stock.
-
-## Inventory MCP server
-
-The Python MCP server exposes two read-only tools over stdio: `search_products(query, limit=10)` searches product names and SKUs, and `check_stock(sku, quantity=1)` reports the available quantity and whether the requested amount is in stock. It uses the same `PRODUCT_DB_PATH` setting as the catalog CLI. The local order workflow currently uses the same repository directly for deterministic product matching and stock checks; MCP remains available to external MCP hosts.
-
-Install the MCP dependency and start the server in MCP Inspector for local tool testing:
-
-```bash
-python -m pip install -e .
-mcp dev src/gmail_order_processor/inventory_mcp_server.py
-```
-
-The SDK's stdio transport is intended to be launched by an MCP host as a child process. For example, a host can launch `python -m gmail_order_processor.inventory_mcp_server` with the project directory as its working directory. The official [MCP Python SDK docs](https://py.sdk.modelcontextprotocol.io/) describe this local stdio setup.
-
-## Phase 5: review-only order workflow
-
-Run the complete sequence on recent Gmail messages:
-
-```bash
-python -m gmail_order_processor.workflow_cli --limit 20
-```
-
-Or run it on the sample messages without connecting to Gmail:
-
-```bash
-python -m gmail_order_processor.workflow_cli --sample-file samples/sample_emails.json --limit 20
-```
-
-The workflow stops for unrelated and uncertain emails. Product inquiries and cancellations are not treated as new orders; they receive only a neutral reply draft marked for human review. New orders are extracted first, including any requested delivery date. The Order Extraction Agent returns one Pydantic `delivery_date` field, resolving common relative dates such as `next Wednesday`, `tomorrow`, or `in 2 weeks` against the email date or today's local date if the email has no date. Pydantic validates the result as a calendar date, but a human still needs to review whether the interpretation is correct. The workflow does not confirm delivery availability. If a date cannot be interpreted, the extractor adds that to `missing_information`, so the inventory lookup is skipped and the draft asks for clarification. Missing products, quantities, or delivery addresses are also explicitly requested. Inventory checks use exact catalog name/SKU matches; ambiguous names, unknown products, and requested variants the catalog cannot represent are sent for human review. After a successful stock check, the workflow creates one `draft` order tied to the Gmail message ID. Reprocessing that message returns the existing order instead of creating another. This is reflected as `draft_created` or `duplicate_order` in the workflow result.
-
-The Response Agent returns a typed subject and body, but the program never sends it. Gmail remains read-only. Draft creation does not alter stock. Orders stay in `draft` until explicitly confirmed; confirmation rechecks and deducts all line quantities in one SQLite transaction. `confirm_order()` and `cancel_order()` both require `authorized=True`; cancellation of a confirmed order restores its quantities transactionally. The workflow never calls these state-changing methods automatically. For example:
-
-```python
-from gmail_order_processor.orders import OrderRepository
-
-orders = OrderRepository()  # uses PRODUCT_DB_PATH or data/products.sqlite3
-draft = orders.get_order(1)
-confirmed = orders.confirm_order(draft.id, authorized=True)
-# Or: orders.cancel_order(draft.id, authorized=True)
-```
-
-Order persistence, duplicate handling, authorization, stock rechecks, and rollback are covered by the local tests:
-
-```bash
-python -m pytest tests/test_order_repository.py tests/test_order_workflow.py
-```
-
-A failed workflow step stops later processing for that message; the CLI emits a safe error status and continues with the next message.
-
-## Step 7: owner approval dashboard
-
-The FastAPI backend exposes authenticated endpoints to list draft orders, inspect their saved AI reply, approve an order, or reject it. The React dashboard shows customer/contact details, products, quantities, catalog prices, delivery address, and the proposed reply. The access token is held in browser memory and expires after the configured number of minutes.
-
-Approving calls the existing transactional `confirm_order()` path: it rechecks and deducts stock, then changes the status to `confirmed`. Rejecting changes a draft to `cancelled` without changing stock. Only the configured owner can call these endpoints. The dashboard does not send replies or change Gmail.
-
-Add these settings to your existing `.env` file without replacing its other values. `.env.example` shows the expected names. Use a long unique password; generate the signing secret with `openssl rand -hex 32` and paste its output as `DASHBOARD_SECRET_KEY`:
-
-```dotenv
-DASHBOARD_OWNER_EMAIL=you@example.com
-DASHBOARD_OWNER_PASSWORD=use-a-long-unique-password
-DASHBOARD_SECRET_KEY=paste-output-from-openssl-rand-hex-32
-DASHBOARD_TOKEN_MINUTES=60
-DASHBOARD_CORS_ORIGINS=http://127.0.0.1:5173
-```
-
-Install the Python dependencies in the project virtual environment:
-
-```bash
-.venv/bin/python -m pip install -e .
-```
-
-Start the API in one terminal from the project root:
+Start the API from the project root:
 
 ```bash
 .venv/bin/python -m uvicorn gmail_order_processor.dashboard_api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Start the React dashboard in a second terminal:
+In another terminal:
 
 ```bash
 cd frontend
@@ -203,11 +54,6 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173` and sign in with `DASHBOARD_OWNER_EMAIL` and `DASHBOARD_OWNER_PASSWORD`. For a fully working dashboard, create draft orders first by running the email workflow. Approve/reject actions are explicit button presses and are enforced again by the authenticated API.
+Open `http://127.0.0.1:5173`. Run `.venv/bin/python -m pytest -q` for the tests; they use mocked services and do not require a Gmail account.
 
-Run the API and order repository tests with:
-
-```bash
-.venv/bin/python -m pytest -q
-```
-
+`mcp_express_example/` is a separate JavaScript Express MCP learning project; it is not connected to this Python app.
