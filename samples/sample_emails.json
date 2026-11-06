@@ -3,7 +3,7 @@
     "id": "email_001",
     "from": "customer01@example.com",
     "subject": "New order - chairs and desks",
-    "body": "Hello, I would like 10 wooden chairs and 3 office desks delivered to Rome. Please let me know the next steps.",
+    "body": "I would like to order 2 Casa Round Dining Tables delivered to Via Roma 10, Rome.",
     "expected_category": "new_order"
   },
   {
