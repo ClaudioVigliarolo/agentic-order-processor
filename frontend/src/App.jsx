@@ -198,6 +198,7 @@ function OrderCard({ order, onAction, pending }) {
 
 function Dashboard({ token, ownerEmail, onLogout }) {
   const [orders, setOrders] = useState([]);
+  const [reviewCases, setReviewCases] = useState([]);
   const [filter, setFilter] = useState('draft');
   const [loading, setLoading] = useState(true);
   const [pendingId, setPendingId] = useState(null);
@@ -208,8 +209,14 @@ function Dashboard({ token, ownerEmail, onLogout }) {
     setLoading(true);
     setError('');
     try {
-      const query = filter === 'all' ? '' : `?status=${encodeURIComponent(filter)}`;
-      setOrders(await api(`/api/orders${query}`, { token }));
+      if (filter === 'review') {
+        setReviewCases(await api('/api/review-cases', { token }));
+        setOrders([]);
+      } else {
+        const query = filter === 'all' ? '' : `?status=${encodeURIComponent(filter)}`;
+        setOrders(await api(`/api/orders${query}`, { token }));
+        setReviewCases([]);
+      }
     } catch (err) {
       if (err.authExpired) onLogout();
       else setError(err.message);
@@ -239,6 +246,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
   }
 
   const drafts = orders.filter((order) => order.status === 'draft').length;
+  const shownCount = filter === 'review' ? reviewCases.length : orders.length;
 
   return (
     <div className="dashboard-shell">
@@ -263,10 +271,11 @@ function Dashboard({ token, ownerEmail, onLogout }) {
         <div className="workflow-notice"><span>!</span><p><strong>Nothing is sent automatically.</strong> Approving confirms the order and updates stock. The suggested reply remains a draft.</p></div>
 
         <div className="list-toolbar">
-          <div><h2>Orders</h2><span className="result-count">{orders.length} shown</span></div>
+          <div><h2>{filter === 'review' ? 'Human review queue' : 'Orders'}</h2><span className="result-count">{shownCount} shown</span></div>
           <label className="filter-control">Show
             <select value={filter} onChange={(event) => setFilter(event.target.value)}>
               <option value="draft">Drafts</option>
+              <option value="review">Human review</option>
               <option value="confirmed">Confirmed</option>
               <option value="cancelled">Rejected</option>
               <option value="all">All orders</option>
@@ -278,6 +287,24 @@ function Dashboard({ token, ownerEmail, onLogout }) {
         {error && <p className="alert error">{error}</p>}
         {loading ? (
           <div className="empty-state"><span className="spinner" />Loading orders…</div>
+        ) : filter === 'review' && reviewCases.length ? (
+          <div className="orders-list">
+            {reviewCases.map((item) => (
+              <article className="order-card review-card" key={item.message_id}>
+                <header className="order-header">
+                  <div><div className="order-id-row"><span className="order-number">{item.subject || '(no subject)'}</span><span className="status-pill draft">{item.status.replaceAll('_', ' ')}</span></div><p className="customer-email">{item.sender} · {item.category || 'unclassified'} · {item.email_date}</p></div>
+                  {item.confidence != null && <div className="order-date">AI confidence<time>{Math.round(item.confidence * 100)}%</time></div>}
+                </header>
+                <section className="order-section"><div className="review-block"><h3>Original email</h3><p>{item.email_body || '(empty message)'}</p></div>
+                  {item.rationale && <div className="review-block"><h3>AI reasoning</h3><p>{item.rationale}</p></div>}
+                  {item.extraction && <div className="review-block"><h3>Extracted details</h3><pre>{JSON.stringify(item.extraction, null, 2)}</pre></div>}
+                  {item.inventory?.length > 0 && <div className="review-block"><h3>Inventory check</h3><pre>{JSON.stringify(item.inventory, null, 2)}</pre></div>}
+                  {item.error && <p className="alert warning">{item.error}</p>}
+                  {item.reply_body && <div className="review-block"><h3>Suggested reply (draft only)</h3>{item.reply_subject && <strong>{item.reply_subject}</strong>}<p>{item.reply_body}</p></div>}
+                </section>
+              </article>
+            ))}
+          </div>
         ) : orders.length ? (
           <div className="orders-list">
             {orders.map((order) => (
@@ -287,8 +314,8 @@ function Dashboard({ token, ownerEmail, onLogout }) {
         ) : (
           <div className="empty-state">
             <span className="empty-icon">✓</span>
-            <h3>{filter === 'draft' ? 'You’re all caught up.' : 'No orders in this view.'}</h3>
-            <p>New order drafts will appear here after the email workflow processes them.</p>
+            <h3>{filter === 'review' ? 'No review cases yet.' : filter === 'draft' ? 'You’re all caught up.' : 'No orders in this view.'}</h3>
+            <p>{filter === 'review' ? 'Messages needing attention will appear after the workflow processes them.' : 'New order drafts will appear here after the email workflow processes them.'}</p>
           </div>
         )}
       </main>

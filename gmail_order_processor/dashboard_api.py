@@ -24,6 +24,7 @@ from .orders import (
     OrderRepository,
     OrderRepositoryError,
     OrderStatus,
+    ReviewCase,
 )
 
 load_dotenv()
@@ -201,6 +202,14 @@ def create_app(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Could not load orders.",
             ) from exc
+
+    @app.get("/api/review-cases", response_model=list[ReviewCase])
+    async def list_review_cases(owner: OwnerIdentity = Depends(require_owner)) -> list[ReviewCase]:
+        del owner
+        try:
+            return repository.list_review_cases()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Could not load review cases.") from exc
 
     @app.get("/api/orders/{order_id}", response_model=Order)
     async def get_order(

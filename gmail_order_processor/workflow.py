@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from email.utils import parseaddr
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
@@ -29,6 +30,7 @@ from .orders import (
     OrderItemRequest,
     OrderRepository,
     OrderRepositoryError,
+    ReviewCase,
 )
 
 
@@ -72,6 +74,36 @@ class OrderWorkflow:
         self.order_repository = order_repository or OrderRepository()
 
     def process(self, message: EmailMessage) -> WorkflowResult:
+        result = self._process(message)
+        if result.status in {
+            WorkflowStatus.HUMAN_REVIEW,
+            WorkflowStatus.HUMAN_REVIEW_ERROR,
+            WorkflowStatus.NEEDS_CUSTOMER_INFORMATION,
+        }:
+            try:
+                self.order_repository.save_review_case(ReviewCase(
+                    message_id=message.message_id,
+                    category=result.category.value if result.category else None,
+                    status=result.status.value,
+                    confidence=result.confidence,
+                    rationale=result.rationale,
+                    sender=message.sender,
+                    subject=message.subject,
+                    email_date=message.date,
+                    email_body=message.body,
+                    extraction=result.order_extraction.model_dump(mode="json") if result.order_extraction else None,
+                    inventory=result.inventory.model_dump(mode="json").get("items") if result.inventory else None,
+                    reply_subject=result.draft_reply.subject if result.draft_reply else None,
+                    reply_body=result.draft_reply.body if result.draft_reply else None,
+                    error=result.error,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                ))
+            except Exception:
+                # A processing result remains available even if review persistence fails.
+                pass
+        return result
+
+    def _process(self, message: EmailMessage) -> WorkflowResult:
         # Fast idempotency check: an already-seen Gmail message never re-enters
         # the AI or inventory steps. The DB unique constraint covers races too.
         try:
