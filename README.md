@@ -1,4 +1,4 @@
-# Gmail Order Processor
+# Agentic Order Processor
 
 A Python project that reads Gmail, classifies order requests, checks a local furniture catalog, and creates orders for owner review. Customer replies remain drafts until an owner edits and explicitly sends them from the dashboard.
 
