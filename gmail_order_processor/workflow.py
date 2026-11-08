@@ -83,6 +83,8 @@ class OrderWorkflow:
             try:
                 self.order_repository.save_review_case(ReviewCase(
                     message_id=message.message_id,
+                    thread_id=message.thread_id,
+                    original_rfc_message_id=message.rfc_message_id,
                     category=result.category.value if result.category else None,
                     status=result.status.value,
                     confidence=result.confidence,

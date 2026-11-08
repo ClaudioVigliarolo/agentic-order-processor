@@ -27,6 +27,10 @@ function formatMoney(euros) {
   }).format(euros);
 }
 
+function recipientFromSender(sender) {
+  return sender.match(/<([^>]+)>/)?.[1] || sender;
+}
+
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -204,6 +208,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
   const [pendingId, setPendingId] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [replyEdits, setReplyEdits] = useState({});
 
   async function loadOrders() {
     setLoading(true);
@@ -245,6 +250,27 @@ function Dashboard({ token, ownerEmail, onLogout }) {
     }
   }
 
+  async function sendReply(item) {
+    const body = replyEdits[item.message_id] ?? item.reply_body ?? '';
+    setPendingId(item.message_id);
+    setError('');
+    setNotice('');
+    try {
+      const result = await api(`/api/review-cases/${encodeURIComponent(item.message_id)}/send`, {
+        method: 'POST', token, body: JSON.stringify({ body }),
+      });
+      setReviewCases((items) => items.map((entry) => entry.message_id === item.message_id
+        ? { ...entry, sent_at: new Date().toISOString(), reply_body: body }
+        : entry));
+      setNotice(`Reply sent to ${result.recipient}.`);
+    } catch (err) {
+      if (err.authExpired) onLogout();
+      else setError(err.message);
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   const drafts = orders.filter((order) => order.status === 'draft').length;
   const shownCount = filter === 'review' ? reviewCases.length : orders.length;
 
@@ -268,7 +294,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
           <div className="summary-card"><span className="summary-icon">◎</span><div><strong>{drafts}</strong><span>drafts to review</span></div></div>
         </section>
 
-        <div className="workflow-notice"><span>!</span><p><strong>Nothing is sent automatically.</strong> Approving confirms the order and updates stock. The suggested reply remains a draft.</p></div>
+        <div className="workflow-notice"><span>!</span><p><strong>Nothing is sent automatically.</strong> Orders are confirmed only when approved. Human review replies are sent only after you edit and click Send.</p></div>
 
         <div className="list-toolbar">
           <div><h2>{filter === 'review' ? 'Human review queue' : 'Orders'}</h2><span className="result-count">{shownCount} shown</span></div>
@@ -292,7 +318,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
             {reviewCases.map((item) => (
               <article className="order-card review-card" key={item.message_id}>
                 <header className="order-header">
-                  <div><div className="order-id-row"><span className="order-number">{item.subject || '(no subject)'}</span><span className="status-pill draft">{item.status.replaceAll('_', ' ')}</span></div><p className="customer-email">{item.sender} · {item.category || 'unclassified'} · {item.email_date}</p></div>
+                  <div><div className="order-id-row"><span className="order-number">{item.subject || '(no subject)'}</span><span className="status-pill draft">{item.status.replaceAll('_', ' ')}</span></div><p className="customer-email">From: {item.sender} · {item.category || 'unclassified'} · {item.email_date}</p></div>
                   {item.confidence != null && <div className="order-date">AI confidence<time>{Math.round(item.confidence * 100)}%</time></div>}
                 </header>
                 <section className="order-section"><div className="review-block"><h3>Original email</h3><p>{item.email_body || '(empty message)'}</p></div>
@@ -300,7 +326,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
                   {item.extraction && <div className="review-block"><h3>Extracted details</h3><pre>{JSON.stringify(item.extraction, null, 2)}</pre></div>}
                   {item.inventory?.length > 0 && <div className="review-block"><h3>Inventory check</h3><pre>{JSON.stringify(item.inventory, null, 2)}</pre></div>}
                   {item.error && <p className="alert warning">{item.error}</p>}
-                  {item.reply_body && <div className="review-block"><h3>Suggested reply (draft only)</h3>{item.reply_subject && <strong>{item.reply_subject}</strong>}<p>{item.reply_body}</p></div>}
+                  {item.reply_body && <div className="review-block"><h3>Reply draft</h3><p className="recipient-line"><strong>To:</strong> {recipientFromSender(item.sender)}</p>{item.reply_subject && <p className="reply-subject-line"><strong>Subject:</strong> {item.reply_subject}</p>}<textarea className="reply-editor" aria-label={`Reply to ${item.sender}`} disabled={Boolean(item.sent_at)} value={replyEdits[item.message_id] ?? item.reply_body} onChange={(event) => setReplyEdits((edits) => ({ ...edits, [item.message_id]: event.target.value }))} />{item.sent_at ? <p className="sent-indicator">Sent {new Date(item.sent_at).toLocaleString()}</p> : <div className="send-row"><p>Review the recipient and text. Sending emails the customer.</p><button className="button primary" disabled={pendingId === item.message_id || !(replyEdits[item.message_id] ?? item.reply_body).trim()} onClick={() => sendReply(item)}>{pendingId === item.message_id ? 'Sending…' : 'Send reply →'}</button></div>}</div>}
                 </section>
               </article>
             ))}
@@ -319,7 +345,7 @@ function Dashboard({ token, ownerEmail, onLogout }) {
           </div>
         )}
       </main>
-      <footer className="page-footer"><span>GMAIL ORDER PROCESSOR</span><span>Human approval required · No emails sent</span></footer>
+      <footer className="page-footer"><span>GMAIL ORDER PROCESSOR</span><span>Human approval required · Replies sent on explicit action</span></footer>
     </div>
   );
 }

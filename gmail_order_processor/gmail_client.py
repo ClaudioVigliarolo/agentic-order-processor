@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import base64
+from email.message import EmailMessage as MimeEmailMessage
 from dataclasses import dataclass
 from datetime import datetime
 from email.header import decode_header, make_header
@@ -22,7 +24,10 @@ from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+]
 
 
 class GmailClientError(Exception):
@@ -46,6 +51,7 @@ class EmailMessage:
     date: str
     body: str
     labels: list[str]
+    rfc_message_id: str = ""
 
 
 def _decode_header(value: str | None) -> str:
@@ -129,7 +135,7 @@ def _format_date(value: str) -> str:
 
 
 class GmailClient:
-    """Gmail client limited to listing and reading messages."""
+    """Gmail client for reading inbox messages and sending reviewed replies."""
 
     def __init__(
         self,
@@ -145,10 +151,18 @@ class GmailClient:
         credentials: Credentials | None = None
         try:
             if self.token_file.exists():
-                credentials = Credentials.from_authorized_user_file(str(self.token_file), SCOPES)
-            if credentials and credentials.valid:
+                # Load the scopes actually granted in token.json. Passing SCOPES
+                # here overwrites that metadata and can make an old read-only
+                # token look like it already has the send permission.
+                credentials = Credentials.from_authorized_user_file(str(self.token_file))
+            if credentials and credentials.valid and credentials.has_scopes(SCOPES):
                 return credentials
-            if credentials and credentials.expired and credentials.refresh_token:
+            if (
+                credentials
+                and credentials.expired
+                and credentials.refresh_token
+                and credentials.has_scopes(SCOPES)
+            ):
                 credentials.refresh(Request())
             else:
                 if not self.credentials_file.is_file():
@@ -165,7 +179,7 @@ class GmailClient:
             raise
         except (GoogleAuthError, OSError, ValueError) as exc:
             raise GmailAuthenticationError(
-                "Gmail OAuth failed. Check the Desktop OAuth client and consent-screen setup."
+                f"Gmail OAuth failed ({type(exc).__name__}): {exc}"
             ) from exc
 
     def _get_service(self) -> Resource | Any:
@@ -220,6 +234,36 @@ class GmailClient:
             except HttpError as exc:
                 raise GmailAPIError("Gmail failed while listing inbox messages.") from exc
 
+    def send_message(
+        self, recipient: str, subject: str, body: str, *,
+        thread_id: str = "", in_reply_to: str = "",
+    ) -> str:
+        """Send a plain text message and return Gmail's sent message ID."""
+        message = MimeEmailMessage()
+        message["To"] = recipient
+        message["Subject"] = subject
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+            message["References"] = in_reply_to
+        message.set_content(body)
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        request_body: dict[str, str] = {"raw": raw}
+        if thread_id:
+            request_body["threadId"] = thread_id
+        try:
+            response = self._get_service().users().messages().send(
+                userId="me", body=request_body
+            ).execute()
+        except HttpError as exc:
+            raise GmailAPIError("Gmail failed while sending the reply.") from exc
+        except GmailAuthenticationError:
+            raise
+        except (GoogleAuthError, OSError, ValueError) as exc:
+            raise GmailAuthenticationError("Could not authenticate with Gmail to send the reply.") from exc
+        if not isinstance(response, dict) or not response.get("id"):
+            raise GmailAPIError("Gmail did not confirm that the reply was sent.")
+        return str(response["id"])
+
     @staticmethod
     def _parse_message(raw: dict[str, Any]) -> EmailMessage:
         if not isinstance(raw, dict) or not raw.get("id"):
@@ -237,5 +281,6 @@ class GmailClient:
             date=_format_date(headers.get("date", "")),
             body=_extract_body(payload),
             labels=[str(item) for item in labels] if isinstance(labels, list) else [],
+            rfc_message_id=headers.get("message-id", ""),
         )
 

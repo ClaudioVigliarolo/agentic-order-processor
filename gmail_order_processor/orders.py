@@ -88,6 +88,8 @@ class Order(BaseModel):
 
 class ReviewCase(BaseModel):
     message_id: str
+    thread_id: str = ""
+    original_rfc_message_id: str = ""
     category: str | None = None
     status: str
     confidence: float | None = None
@@ -102,6 +104,7 @@ class ReviewCase(BaseModel):
     reply_body: str | None = None
     error: str | None = None
     created_at: str
+    sent_at: str | None = None
 
 
 class OrderRepository:
@@ -163,7 +166,9 @@ class OrderRepository:
                     confidence REAL, rationale TEXT, sender TEXT NOT NULL,
                     subject TEXT NOT NULL, email_date TEXT NOT NULL, email_body TEXT NOT NULL,
                     extraction_json TEXT, inventory_json TEXT, reply_subject TEXT,
-                    reply_body TEXT, error TEXT, created_at TEXT NOT NULL
+                    reply_body TEXT, error TEXT, created_at TEXT NOT NULL, sent_at TEXT,
+                    thread_id TEXT NOT NULL DEFAULT '',
+                    original_rfc_message_id TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_review_cases_created ON review_cases(created_at DESC);
                 """
@@ -176,24 +181,37 @@ class OrderRepository:
                 connection.execute("ALTER TABLE orders ADD COLUMN response_subject TEXT")
             if "response_body" not in columns:
                 connection.execute("ALTER TABLE orders ADD COLUMN response_body TEXT")
+            review_columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(review_cases)").fetchall()}
+            if "sent_at" not in review_columns:
+                connection.execute("ALTER TABLE review_cases ADD COLUMN sent_at TEXT")
+            if "thread_id" not in review_columns:
+                connection.execute("ALTER TABLE review_cases ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''")
+            if "original_rfc_message_id" not in review_columns:
+                connection.execute("ALTER TABLE review_cases ADD COLUMN original_rfc_message_id TEXT NOT NULL DEFAULT ''")
 
     def save_review_case(self, case: ReviewCase) -> None:
         import json
         self.initialize()
         with self._connection() as connection:
             connection.execute(
-                """INSERT INTO review_cases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO review_cases (
+                message_id, category, status, confidence, rationale, sender, subject,
+                email_date, email_body, extraction_json, inventory_json, reply_subject,
+                reply_body, error, created_at, sent_at, thread_id, original_rfc_message_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(message_id) DO UPDATE SET category=excluded.category,
                 status=excluded.status, confidence=excluded.confidence, rationale=excluded.rationale,
                 sender=excluded.sender, subject=excluded.subject, email_date=excluded.email_date,
                 email_body=excluded.email_body, extraction_json=excluded.extraction_json,
                 inventory_json=excluded.inventory_json, reply_subject=excluded.reply_subject,
-                reply_body=excluded.reply_body, error=excluded.error, created_at=excluded.created_at""",
+                reply_body=CASE WHEN review_cases.sent_at IS NULL THEN excluded.reply_body ELSE review_cases.reply_body END,
+                error=excluded.error, created_at=excluded.created_at""",
                 (case.message_id, case.category, case.status, case.confidence, case.rationale,
                  case.sender, case.subject, case.email_date, case.email_body,
                  json.dumps(case.extraction) if case.extraction is not None else None,
                  json.dumps(case.inventory) if case.inventory is not None else None,
-                 case.reply_subject, case.reply_body, case.error, case.created_at),
+                 case.reply_subject, case.reply_body, case.error, case.created_at, case.sent_at,
+                 case.thread_id, case.original_rfc_message_id),
             )
 
     def list_review_cases(self) -> list[ReviewCase]:
@@ -202,14 +220,28 @@ class OrderRepository:
         with self._connection() as connection:
             rows = connection.execute("SELECT * FROM review_cases ORDER BY created_at DESC").fetchall()
         return [ReviewCase(
-            message_id=row["message_id"], category=row["category"], status=row["status"],
+            message_id=row["message_id"], thread_id=row["thread_id"],
+            original_rfc_message_id=row["original_rfc_message_id"], category=row["category"], status=row["status"],
             confidence=row["confidence"], rationale=row["rationale"], sender=row["sender"],
             subject=row["subject"], email_date=row["email_date"], email_body=row["email_body"],
             extraction=json.loads(row["extraction_json"]) if row["extraction_json"] else None,
             inventory=json.loads(row["inventory_json"]) if row["inventory_json"] else None,
             reply_subject=row["reply_subject"], reply_body=row["reply_body"], error=row["error"],
-            created_at=row["created_at"]
+            created_at=row["created_at"], sent_at=row["sent_at"]
         ) for row in rows]
+
+    def get_review_case(self, message_id: str) -> ReviewCase | None:
+        return next((case for case in self.list_review_cases() if case.message_id == message_id), None)
+
+    def mark_review_case_sent(self, message_id: str, reply_body: str) -> None:
+        self.initialize()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "UPDATE review_cases SET sent_at = ?, reply_body = ? WHERE message_id = ? AND sent_at IS NULL",
+                (_utc_now(), reply_body, message_id),
+            )
+            if cursor.rowcount != 1:
+                raise InvalidOrderStateError("This review case has already been sent or no longer exists.")
 
     def create_draft_order(
         self,

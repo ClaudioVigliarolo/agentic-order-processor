@@ -1,12 +1,12 @@
 # Gmail Order Processor
 
-A Python project that reads Gmail, classifies order requests, checks a local furniture catalog, and creates orders for owner review. Gmail access uses only `gmail.readonly`; the app does not change Gmail or send email.
+A Python project that reads Gmail, classifies order requests, checks a local furniture catalog, and creates orders for owner review. Customer replies remain drafts until an owner edits and explicitly sends them from the dashboard.
 
 Developed with the assistance of AI tools.
 
 ## Setup
 
-Create a Google Cloud project, enable the Gmail API, configure the OAuth consent screen, and create a **Desktop app** OAuth client. Download its credentials JSON as `credentials.json` into the project root. On first Gmail access, a browser opens for authorization; the app saves the local token as `token.json`. Both files are ignored by Git.
+Create a Google Cloud project, enable the Gmail API, configure the OAuth consent screen, and create a **Desktop app** OAuth client. Add the `gmail.readonly` and `gmail.send` scopes to the OAuth consent screen's Data Access settings. Download the OAuth client JSON as `credentials.json` into the project root. The first Gmail access opens a browser for authorization; the app saves the granted scopes in `token.json`. Both files are ignored by Git. If you previously authorized the read-only version, the app will request consent again for sending.
 
 From the project root, create the virtual environment and install dependencies:
 
@@ -38,7 +38,7 @@ The workflow creates a draft order only when a new order has enough information 
 
 ## Owner dashboard
 
-The dashboard shows saved orders and their AI reply drafts. Sign in with the configured owner credentials. Approving a draft rechecks and deducts stock; rejecting it cancels it. Both actions require authentication. Replies are never sent.
+The dashboard shows saved orders and human review cases. On a review case, inspect the recipient, edit the suggested reply, then click **Send reply** to send it through the authorized Gmail account. Order approval rechecks and deducts stock; rejecting an order cancels it. Dashboard actions require owner authentication.
 
 Start the API from the project root:
 

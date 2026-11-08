@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field, field_validator
+from .gmail_client import GmailAPIError, GmailAuthenticationError, GmailClient
 
 from .orders import (
     InsufficientStockError,
@@ -60,6 +61,10 @@ class OwnerIdentity(BaseModel):
     role: str = "owner"
 
 
+class SendReviewReplyRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=20000)
+
+
 def create_app(
     order_repository: OrderRepository | None = None,
     *,
@@ -68,9 +73,14 @@ def create_app(
     jwt_secret: str | None = None,
     token_minutes: int | None = None,
     cors_origins: list[str] | None = None,
+    gmail_client: GmailClient | None = None,
 ) -> FastAPI:
     """Build the dashboard API; injectable settings keep auth testable."""
     repository = order_repository or OrderRepository()
+    mailer = gmail_client or GmailClient(
+        os.getenv("GMAIL_CREDENTIALS_FILE", "credentials.json"),
+        os.getenv("GMAIL_TOKEN_FILE", "token.json"),
+    )
     configured_email = (owner_email or os.getenv("DASHBOARD_OWNER_EMAIL", "")).strip()
     configured_password = owner_password or os.getenv("DASHBOARD_OWNER_PASSWORD", "")
     configured_secret = jwt_secret or os.getenv("DASHBOARD_SECRET_KEY", "")
@@ -210,6 +220,42 @@ def create_app(
             return repository.list_review_cases()
         except Exception as exc:
             raise HTTPException(status_code=500, detail="Could not load review cases.") from exc
+
+    @app.post("/api/review-cases/{message_id}/send")
+    async def send_review_reply(
+        message_id: str,
+        request: SendReviewReplyRequest,
+        owner: OwnerIdentity = Depends(require_owner),
+    ) -> dict[str, str]:
+        del owner
+        case = repository.get_review_case(message_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Review case not found.")
+        if case.sent_at:
+            raise HTTPException(status_code=409, detail="A reply was already sent for this case.")
+        recipient = parseaddr(case.sender)[1].strip()
+        if not recipient or "@" not in recipient:
+            raise HTTPException(status_code=400, detail="The email sender has no valid reply address.")
+        body = request.body.strip()
+        if not body:
+            raise HTTPException(status_code=422, detail="Reply text cannot be empty.")
+        subject = case.reply_subject or case.subject
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        try:
+            sent_id = mailer.send_message(
+                recipient, subject, body, thread_id=case.thread_id,
+                in_reply_to=case.original_rfc_message_id,
+            )
+            repository.mark_review_case_sent(message_id, body)
+            return {"status": "sent", "recipient": recipient, "gmail_message_id": sent_id}
+        except GmailAuthenticationError as exc:
+            print(f"Gmail auth error: {exc}")
+            raise HTTPException(status_code=503, detail=f"Gmail authorization required: {exc}") from exc
+        except GmailAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Could not record sent reply status.") from exc
 
     @app.get("/api/orders/{order_id}", response_model=Order)
     async def get_order(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -46,6 +47,49 @@ class InventoryAgent:
     def _normalize(value: str) -> str:
         return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
 
+    @classmethod
+    def _tokens(cls, value: str) -> frozenset[str]:
+        """Normalize common English plurals without changing product identity."""
+        tokens = cls._normalize(value).split()
+        normalized = []
+        for token in tokens:
+            if len(token) > 4 and token.endswith("ies"):
+                token = token[:-3] + "y"
+            elif len(token) > 4 and token.endswith(("ches", "shes", "sses", "xes", "zes")):
+                token = token[:-2]
+            elif len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+                token = token[:-1]
+            normalized.append(token)
+        return frozenset(normalized)
+
+    @classmethod
+    def _matching_products(cls, requested_name: str, products: list[Product]) -> list[Product]:
+        """Return the unique best catalog match, allowing safe name variations."""
+        requested = cls._tokens(requested_name)
+        if not requested:
+            return []
+        scored: list[tuple[float, Product]] = []
+        request_text = " ".join(sorted(requested))
+        for product in products:
+            product_tokens = cls._tokens(product.name)
+            sku_tokens = cls._tokens(product.sku)
+            if requested == product_tokens or requested == sku_tokens:
+                score = 1.0
+            elif len(requested) >= 2 and requested < product_tokens:
+                # A shorter, specific phrase such as “dining table” may match
+                # a catalog name, but all candidates remain subject to tie checks.
+                score = 0.94
+            else:
+                product_text = " ".join(sorted(product_tokens))
+                score = SequenceMatcher(None, request_text, product_text).ratio()
+                if score < 0.88:
+                    continue
+            scored.append((score, product))
+        if not scored:
+            return []
+        best_score = max(score for score, _ in scored)
+        return [product for score, product in scored if score == best_score]
+
     def check(self, extraction: OrderExtraction) -> InventoryCheck:
         results: list[InventoryItemResult] = []
         for requested in extraction.products:
@@ -58,24 +102,13 @@ class InventoryAgent:
                 ))
                 continue
 
-            search_name = requested.name.strip()
-            candidates = self.repository.search_products(search_name, limit=50)
-            if not candidates and search_name.casefold().endswith("s"):
-                candidates = self.repository.search_products(search_name[:-1], limit=50)
-            normalized_name = self._normalize(requested.name)
-            exact: list[Product] = []
-            for product in candidates:
-                normalized_product = self._normalize(product.name)
-                normalized_sku = self._normalize(product.sku)
-                singular_request = normalized_name[:-1] if normalized_name.endswith("s") else normalized_name
-                singular_product = normalized_product[:-1] if normalized_product.endswith("s") else normalized_product
-                if normalized_sku == normalized_name or singular_product == singular_request:
-                    exact.append(product)
+            catalog = self.repository.list_products()
+            matches = self._matching_products(requested.name, catalog)
 
-            if len(exact) != 1:
+            if len(matches) != 1:
                 status = (
                     InventoryItemStatus.NOT_FOUND
-                    if not candidates
+                    if not matches
                     else InventoryItemStatus.AMBIGUOUS
                 )
                 results.append(InventoryItemResult(
@@ -90,7 +123,7 @@ class InventoryAgent:
                 ))
                 continue
 
-            product = exact[0]
+            product = matches[0]
             variants = requested.variants
             if variants.color or variants.size or variants.model:
                 results.append(InventoryItemResult(

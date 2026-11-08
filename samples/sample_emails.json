@@ -1,98 +1,105 @@
 [
+    {
+    "id": "email_001",
+    "from": "claudio.vigliarolo.fin@gmail.com",
+    "subject": "New order - chairs and desks",
+    "body": "I would like to order 2 Casa Round Dining Tables delivered to Via Roma 10, Rome.",
+    "expected_category": "new_order"
+  },
   {
     "id": "email_001",
-    "from": "customer01@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "New order - chairs and desks",
     "body": "I would like to order 2 Casa Round Dining Tables delivered to Via Roma 10, Rome.",
     "expected_category": "new_order"
   },
   {
     "id": "email_002",
-    "from": "customer02@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Blue sofas for our waiting room",
     "body": "Can you send us 2 blue sofas? We need delivery to Milan by November 12.",
     "expected_category": "new_order"
   },
   {
     "id": "email_03",
-    "from": "customer10@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Refund",
     "body": "I want a refund bro!",
     "expected_category": "cancellation"
   },
   {
     "id": "email_004",
-    "from": "customer04@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Need 15 tables",
     "body": "We would like to purchase fifteen folding tables, preferably white. Is that possible?",
     "expected_category": "new_order"
   },
   {
     "id": "email_005",
-    "from": "customer05@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Repeat our last order",
     "body": "Please repeat our last order of stools, same quantities as before.",
     "expected_category": "new_order"
   },
   {
     "id": "email_006",
-    "from": "customer06@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Chairs if in stock",
     "body": "If you have 20 green dining chairs available, I would like to order them. Otherwise, please contact me first.",
     "expected_category": "new_order"
   },
   {
     "id": "email_007",
-    "from": "customer07@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Urgent delivery request",
     "body": "Please arrange 4 oak bookshelves for delivery to Florence next week.",
     "expected_category": "new_order"
   },
   {
     "id": "email_008",
-    "from": "customer08@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Quote for meeting room",
     "body": "How much would 8 conference chairs and a large table cost? We are comparing suppliers.",
     "expected_category": "product_inquiry"
   },
   {
     "id": "email_009",
-    "from": "customer09@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Are these desks adjustable?",
     "body": "Do you sell height-adjustable desks? What are the dimensions?",
     "expected_category": "product_inquiry"
   },
   {
     "id": "email_010",
-    "from": "customer10@example.com",
+    "from": "claudio.vigliarolo.fin@gmail.com",
     "subject": "Sofa fabric options",
     "body": "Could you tell me whether your sofas come in velvet and what colors are available?",
     "expected_category": "product_inquiry"
   },
   {
     "id": "email_011",
-    "from": "customer11@example.com",
+    "from": "claviglia54@gmail.com",
     "subject": "Bulk discount",
     "body": "Do you offer discounts on orders of 100 chairs? I have not decided yet.",
     "expected_category": "product_inquiry"
   },
   {
     "id": "email_012",
-    "from": "customer12@example.com",
+    "from": "claviglia54@gmail.com",
     "subject": "Cancel order 8742",
     "body": "Please cancel order #8742. We no longer need the desks.",
     "expected_category": "cancellation"
   },
   {
     "id": "email_013",
-    "from": "customer13@example.com",
+    "from": "claviglia54@gmail.com",
     "subject": "Stop shipment",
     "body": "I need to cancel the 5 chairs I ordered yesterday. Can you stop shipment?",
     "expected_category": "cancellation"
   },
   {
     "id": "email_014",
-    "from": "customer14@example.com",
+    "from": "claviglia54@gmail.com",
     "subject": "Re: order 2201",
     "body": "Actually, please cancel my previous order #2201 rather than changing the delivery date.",
     "expected_category": "cancellation"
